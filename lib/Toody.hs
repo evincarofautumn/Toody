@@ -8,11 +8,16 @@
 module Toody
   ( Grid(..)
   , Neighborhood(..)
+  , Parser(runParser)
   , Zipper(..)
+  , between
   , eastward
+  , equal
   , leftward
+  , lookahead
   , makeGrid
   , makeZipper
+  , moving
   , neighborhood
   , northeastward
   , northward
@@ -202,7 +207,7 @@ makeGrid p rows0 = let
 -- either fails with a 'ParseError', or returns a parsed value and an updated
 -- 'Grid', or 'Nothing' if the grid couldn't be updated.
 newtype Parser c a = Parser
-  { unParser :: Move c -> Maybe (Grid c) -> Either ParseError (a, Maybe (Grid c)) }
+  { runParser :: Move c -> Maybe (Grid c) -> Either ParseError (a, Maybe (Grid c)) }
 
 type ParseError = String
 
@@ -221,6 +226,10 @@ satisfy predicate = Parser $ \ move mGrid -> do
     Just cell
       | predicate cell -> Right (cell, move =<< mGrid)
       | otherwise      -> Left ("Toody.satisfy: failed to satisfy: " ++ show mGrid)
+
+-- | Accept a single cell equal to a given cell.
+equal :: (Eq c, Show c) => c -> Parser c c
+equal = satisfy . (==)
 
 -- | Accept anything and advance in the current direction.
 anything :: (Show c) => Parser c c
@@ -269,7 +278,7 @@ instance Monad (Parser c) where
   return = pure
   Parser p1 >>= f = Parser $ \ move mGrid -> do
     (c, mGrid') <- p1 move mGrid
-    unParser (f c) move mGrid'
+    runParser (f c) move mGrid'
 
 instance Alternative (Parser c) where
   empty = failure

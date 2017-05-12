@@ -26,8 +26,9 @@ module Toody
   , zipperLength
   ) where
 
+import Control.Applicative (Alternative(..))
 import Control.Comonad (Comonad(..))
-import Control.Monad ((<=<))
+import Control.Monad (MonadPlus(..), (<=<))
 import Data.Function (on)
 import Data.List (intercalate)
 
@@ -194,6 +195,94 @@ makeGrid p rows0 = let
       pad = take width . (++ repeat p)
       in Grid (makeZipper z0 (map (makeZipper p . pad) rows0))
     [] -> Grid (makeZipper z0 [z0])
+
+-- Parsing primitives.
+
+-- | A parser is a function that accepts the current state of a 'Grid', and
+-- either fails with a 'ParseError', or returns a parsed value and an updated
+-- 'Grid', or 'Nothing' if the grid couldn't be updated.
+newtype Parser c a = Parser
+  { unParser :: Move c -> Maybe (Grid c) -> Either ParseError (a, Maybe (Grid c)) }
+
+type ParseError = String
+
+type Move c = Grid c -> Maybe (Grid c)
+
+-- | Locally override the direction of a parser.
+moving :: Move c -> Parser c a -> Parser c a
+moving move (Parser p) = Parser $ \ _move grid -> p move grid
+
+-- | Accept a cell matching a predicate and advance in the current direction.
+satisfy :: (Show c) => (c -> Bool) -> Parser c c
+satisfy predicate = Parser $ \ move mGrid -> do
+  let mCell = extract <$> mGrid
+  case mCell of
+    Nothing -> Left "Toody.satisfy: unexpected grid boundary"
+    Just cell
+      | predicate cell -> Right (cell, move =<< mGrid)
+      | otherwise      -> Left ("Toody.satisfy: failed to satisfy: " ++ show mGrid)
+
+-- | Accept anything and advance in the current direction.
+anything :: (Show c) => Parser c c
+anything = satisfy (const True)
+
+-- | Accept only a grid boundary.
+boundary :: Parser c ()
+boundary = Parser $ \ _move mGrid -> case mGrid of
+  Nothing -> Right ((), mGrid)
+  Just c  -> Left "Toody.boundary: expected grid boundary"
+
+between :: Parser c b -> Parser c e -> Parser c i -> Parser c i
+between begin end item = begin *> item <* end
+
+-- | Run a parser, ignoring any motion it makes.
+lookahead :: Parser c a -> Parser c a
+lookahead (Parser p) = Parser $ \ move mGrid -> do
+  (c, _mGrid') <- p move mGrid
+  pure (c, mGrid)
+
+-- TODO: Add 'try'? Would require distinguishing "failed but consumed no input"
+-- from "failed and consumed input" as Parsec does.
+
+negative :: Parser c a -> Parser c ()
+negative (Parser p) = Parser $ \ move mGrid -> case p move mGrid of
+  Left{} -> Right ((), mGrid)
+  Right{} -> Left "Toody.negative: expected parser failure"
+
+instance Functor (Parser c) where
+  fmap f (Parser p) = Parser $ \ move grid -> case p move grid of
+    Left  e           -> Left e
+    Right (c, mGrid') -> Right (f c, mGrid')
+
+instance Applicative (Parser c) where
+
+  pure :: a -> Parser c a
+  pure c = Parser $ \ _move mGrid -> Right (c, mGrid)
+
+  (<*>) :: Parser c (a -> b) -> Parser c a -> Parser c b
+  Parser f <*> Parser x = Parser $ \ move mGrid -> do
+    (f', mGrid') <- f move mGrid
+    (x', mGrid'') <- x move mGrid'
+    pure (f' x', mGrid'')
+
+instance Monad (Parser c) where
+  return = pure
+  Parser p1 >>= f = Parser $ \ move mGrid -> do
+    (c, mGrid') <- p1 move mGrid
+    unParser (f c) move mGrid'
+
+instance Alternative (Parser c) where
+  empty = failure
+  Parser p1 <|> Parser p2 = Parser $ \ move grid -> case p1 move grid of
+    Left e  -> p2 move grid
+    success -> success
+
+instance MonadPlus (Parser c) where
+  mzero = empty
+  mplus = (<|>)
+
+failure :: Parser c a
+failure = Parser $ \ _move _grid -> Left "Toody.failure: generic parser failure"
 
 -- Debugging utilities.
 

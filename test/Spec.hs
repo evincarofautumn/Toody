@@ -62,3 +62,21 @@ spec = do
 
       (fst <$> runParser box' eastward (Just testGrid))
         `shouldBe` Right [Box (Point 0 11) (Size 4 1), Box (Point 1 4) (Size 3 1)]
+
+    it "finds nearest box in a direction" $ do
+
+      let
+        testGrid = makeGrid ' '
+          [ "     ┌───┐"
+          , "     │   │"
+          , "┌───┐└───┘"
+          , "│   │     "
+          , "└───┘     "
+          ]
+        box' = nearest lightBox
+
+      (fst <$> runParser box' southward (Just testGrid))
+        `shouldBe` Right (Box (Point 2 0) (Size 3 1))
+
+      (fst <$> runParser box' eastward (Just testGrid))
+        `shouldBe` Right (Box (Point 0 5) (Size 3 1))

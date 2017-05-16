@@ -35,6 +35,7 @@ module Toody
   , makeGrid
   , makeZipper
   , moving
+  , nearest
   , neighborhood
   , northeastward
   , northward
@@ -329,6 +330,19 @@ everywhere (Parser parse) = Parser $ \ move mGrid -> case mGrid of
       Right (c, _) -> c : acc
     results = foldr collectSuccess [] (fmap (parse move . Just) possibilities)
     in Right (results, mGrid)
+
+nearest :: Parser c a -> Parser c a
+nearest (Parser parse) = Parser seek
+  where
+    seek move = go
+      where
+        go mGrid = case parse move mGrid of
+          Right (result, mGrid') -> Right (result, mGrid')
+          Left{} -> case mGrid of
+            Nothing -> Left "cannot find nearest outside grid"
+            Just grid -> case move grid of
+              mGrid'@Just{} -> go mGrid'
+              Nothing -> Left "got to edge of grid without finding nearest"
 
 -- Box parser utilities.
 

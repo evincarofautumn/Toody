@@ -12,7 +12,9 @@ module Toody
   , Column
   , Grid(..)
   , Height
+  , Move
   , Neighborhood(..)
+  , ParseError
   , Parser(runParser)
   , Point(..)
   , Row

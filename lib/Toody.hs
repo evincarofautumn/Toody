@@ -28,6 +28,9 @@ module Toody
   , eastward
   , equal
   , everywhere
+  , getGrid
+  , getLocation
+  , gridLocation
   , leftward
   , lightBox
   , lightBoxStyle
@@ -41,9 +44,12 @@ module Toody
   , northward
   , northwestward
   , rightward
+  , satisfy
+  , setGrid
   , southeastward
   , southward
   , southwestward
+  , step
   , westward
   , zipperIndex
   , zipperLength
@@ -52,10 +58,11 @@ module Toody
 import Control.Applicative (Alternative(..))
 import Control.Arrow ((&&&))
 import Control.Comonad (Comonad(..))
-import Control.Monad (MonadPlus(..), (<=<), guard)
+import Control.Monad (MonadPlus(..), (<=<), guard, void)
 import Data.Foldable (Foldable(..))
 import Data.Function (on)
 import Data.List (intercalate)
+import Data.Monoid ((<>))
 
 -- | A 1D zipper, representing a sequence of values with a focus.
 data Zipper a = Zipper
@@ -221,6 +228,9 @@ makeGrid p rows0 = let
       in Grid (makeZipper z0 (map (makeZipper p . pad) rows0))
     [] -> Grid (makeZipper z0 [z0])
 
+gridLocation :: Grid a -> Point
+gridLocation = uncurry Point . (zipperIndex &&& zipperIndex . zipperCurrent) . unGrid
+
 -- Parsing primitives.
 
 -- | A parser is a function that accepts the current state of a 'Grid', and
@@ -246,6 +256,10 @@ satisfy predicate = Parser $ \ move mGrid -> do
     Just cell
       | predicate cell -> Right (cell, move =<< mGrid)
       | otherwise      -> Left ("Toody.satisfy: failed to satisfy: " ++ show mGrid)
+
+-- | Step one cell in a direction.
+step :: (Show c) => Move c -> Parser c ()
+step move = void (moving move anything)
 
 -- | Accept a single cell equal to a given cell.
 equal :: (Eq c, Show c) => c -> Parser c c
@@ -299,10 +313,12 @@ instance Monad (Parser c) where
   Parser p1 >>= f = Parser $ \ move mGrid -> do
     (c, mGrid') <- p1 move mGrid
     runParser (f c) move mGrid'
-  fail message = Parser $ \ _move _grid -> Left message
+  fail message = Parser $ \ _move mGrid -> Left
+    (maybe "out of bounds" (humanLocation . gridLocation) mGrid
+      <> ": " <> message)
 
 instance Alternative (Parser c) where
-  empty = failure
+  empty = fail "empty"
   Parser p1 <|> Parser p2 = Parser $ \ move grid -> case p1 move grid of
     Left e  -> p2 move grid
     success -> success
@@ -312,11 +328,21 @@ instance MonadPlus (Parser c) where
   mplus = (<|>)
 
 failure :: Parser c a
-failure = Parser $ \ _move _grid -> Left "Toody.failure: generic parser failure"
+failure = Parser $ \ _move mGrid -> Left
+  (maybe "out of bounds" (humanLocation . gridLocation) mGrid
+    <> ": generic parser failure")
+
+humanLocation :: Point -> String
+humanLocation (Point row column) = show row <> ":" <> show column
 
 getLocation :: Parser c (Maybe Point)
-getLocation = Parser $ \ _move mGrid -> Right ((fmap get &&& id) mGrid)
-  where get = uncurry Point . (zipperIndex &&& zipperIndex . zipperCurrent) . unGrid
+getLocation = Parser $ \ _move mGrid -> Right ((fmap gridLocation &&& id) mGrid)
+
+getGrid :: Parser c (Maybe (Grid c))
+getGrid = Parser $ \ _move mGrid -> Right (mGrid, mGrid)
+
+setGrid :: Grid c -> Parser c ()
+setGrid grid = Parser $ \ _move _grid -> Right ((), Just grid)
 
 -- Parser searching combinators.
 

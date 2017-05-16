@@ -12,23 +12,7 @@ spec = do
 
   describe "parsing boxes" $ do
 
-    let
-      -- Parse a box clockwise from the top left corner and return its size.
-      box = do
-        width   <- moving eastward  horizontal
-        height  <- moving southward vertical
-        width'  <- moving westward  horizontal
-        guard (width == width')
-        height' <- moving northward vertical
-        guard (height == height')
-        pure (width, height)
-      horizontal = edge (equal '-')
-      vertical = edge (equal '|')
-      edge = fmap length . capped . many
-      cap = equal '+'
-      capped = between cap (lookahead cap)
-
-    it "parses a single box" $ do
+    it "parses a single ASCII box" $ do
 
       let
         testGrid = makeGrid ' '
@@ -38,11 +22,43 @@ spec = do
           , "+----+"
           ]
 
-      case runParser box eastward (Just testGrid) of
-        Right ((4, 2), _) -> pure ()
-        result -> assertFailure
-          (concat
-            [ "expected 'Right ((4, 2), _)' but got '"
-            , show result
-            , "'"
-            ])
+      (fst <$> runParser asciiBox eastward (Just testGrid))
+        `shouldBe` Right (Box (Point 0 0) (Size 4 2))
+
+    it "parses a single Unicode box" $ do
+
+      let
+        testGrid = makeGrid ' '
+          [ "┌───┐"
+          , "│   │"
+          , "└───┘"
+          ]
+
+      (fst <$> runParser lightBox eastward (Just testGrid))
+        `shouldBe` Right (Box (Point 0 0) (Size 3 1))
+
+    it "finds and parses multiple boxes" $ do
+      let
+        testGrid = makeGrid ' '
+          [ "           +----+"
+          , "    +---+  |    |"
+          , "    |   |  +----+"
+          , "    +---+        "
+          ]
+        box' = everywhere asciiBox
+
+      (fst <$> runParser box' eastward (Just testGrid))
+        `shouldBe` Right [Box (Point 0 11) (Size 4 1), Box (Point 1 4) (Size 3 1)]
+
+    it "finds and parses multiple different Unicode boxes" $ do
+      let
+        testGrid = makeGrid ' '
+          [ "           ╔════╗"
+          , "    ┌───┐  ║    ║"
+          , "    │   │  ╚════╝"
+          , "    └───┘        "
+          ]
+        box' = everywhere (lightBox <|> doubleBox)
+
+      (fst <$> runParser box' eastward (Just testGrid))
+        `shouldBe` Right [Box (Point 0 11) (Size 4 1), Box (Point 1 4) (Size 3 1)]

@@ -1,19 +1,36 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Toody
-  ( Grid(..)
+  ( Box(..)
+  , BoxStyle(..)
+  , Column
+  , Grid(..)
+  , Height
   , Neighborhood(..)
   , Parser(runParser)
+  , Point(..)
+  , Row
+  , Size(..)
+  , Width
   , Zipper(..)
+  , asciiBox
+  , asciiBoxStyle
   , between
+  , box
+  , doubleBox
+  , doubleBoxStyle
   , eastward
   , equal
+  , everywhere
   , leftward
+  , lightBox
+  , lightBoxStyle
   , lookahead
   , makeGrid
   , makeZipper
@@ -32,8 +49,10 @@ module Toody
   ) where
 
 import Control.Applicative (Alternative(..))
+import Control.Arrow ((&&&))
 import Control.Comonad (Comonad(..))
-import Control.Monad (MonadPlus(..), (<=<))
+import Control.Monad (MonadPlus(..), (<=<), guard)
+import Data.Foldable (Foldable(..))
 import Data.Function (on)
 import Data.List (intercalate)
 
@@ -79,7 +98,7 @@ zipperIndex = length . zipperBefore
 
 -- | A 2D zipper representing a grid of values with a focus.
 newtype Grid a = Grid { unGrid :: Zipper (Zipper a) }
-  deriving (Eq, Functor)
+  deriving (Eq, Foldable, Functor, Traversable)
 
 -- | Motion within a grid.
 northwestward, northward, northeastward,
@@ -279,6 +298,7 @@ instance Monad (Parser c) where
   Parser p1 >>= f = Parser $ \ move mGrid -> do
     (c, mGrid') <- p1 move mGrid
     runParser (f c) move mGrid'
+  fail message = Parser $ \ _move _grid -> Left message
 
 instance Alternative (Parser c) where
   empty = failure
@@ -292,6 +312,109 @@ instance MonadPlus (Parser c) where
 
 failure :: Parser c a
 failure = Parser $ \ _move _grid -> Left "Toody.failure: generic parser failure"
+
+getLocation :: Parser c (Maybe Point)
+getLocation = Parser $ \ _move mGrid -> Right ((fmap get &&& id) mGrid)
+  where get = uncurry Point . (zipperIndex &&& zipperIndex . zipperCurrent) . unGrid
+
+-- Parser searching combinators.
+
+everywhere :: Parser c a -> Parser c [a]
+everywhere (Parser parse) = Parser $ \ move mGrid -> case mGrid of
+  Nothing -> pure ([], Nothing)
+  Just grid -> let
+    possibilities = duplicate grid
+    collectSuccess mc acc = case mc of
+      Left{} -> acc
+      Right (c, _) -> c : acc
+    results = foldr collectSuccess [] (fmap (parse move . Just) possibilities)
+    in Right (results, mGrid)
+
+-- Box parser utilities.
+
+data BoxStyle c = BoxStyle
+  { boxTopLeft, boxTopRight, boxBottomLeft, boxBottomRight
+  , boxHorizontal, boxVertical :: c
+  } deriving (Eq, Functor, Show)
+
+-- | Predefined box styles.
+asciiBoxStyle, lightBoxStyle, doubleBoxStyle :: BoxStyle Char
+
+asciiBoxStyle = BoxStyle
+  { boxTopLeft     = '+'
+  , boxTopRight    = '+'
+  , boxBottomLeft  = '+'
+  , boxBottomRight = '+'
+  , boxHorizontal  = '-'
+  , boxVertical    = '|'
+  }
+
+lightBoxStyle = BoxStyle
+  { boxTopLeft     = '┌'
+  , boxTopRight    = '┐'
+  , boxBottomLeft  = '└'
+  , boxBottomRight = '┘'
+  , boxHorizontal  = '─'
+  , boxVertical    = '│'
+  }
+
+doubleBoxStyle = BoxStyle
+  { boxTopLeft     = '╔'
+  , boxTopRight    = '╗'
+  , boxBottomLeft  = '╚'
+  , boxBottomRight = '╝'
+  , boxHorizontal  = '═'
+  , boxVertical    = '║'
+  }
+
+-- | Convenience parsers for different box styles.
+asciiBox, lightBox, doubleBox :: Parser Char Box
+
+asciiBox  = box asciiBoxStyle
+lightBox  = box lightBoxStyle
+doubleBox = box doubleBoxStyle
+
+-- | Parse a box clockwise from the top left corner according to the given style
+-- and return its location and size.
+box :: (Eq c, Show c) => BoxStyle c -> Parser c Box
+box style = do
+  location <- maybe (fail "cannot parse box outside grid") pure =<< getLocation
+
+  width   <- moving eastward  (between topLeft     (lookahead topRight)    horizontal)
+  height  <- moving southward (between topRight    (lookahead bottomRight) vertical)
+  width'  <- moving westward  (between bottomRight (lookahead bottomLeft)  horizontal)
+  height' <- moving northward (between bottomLeft  (lookahead topLeft)     vertical)
+
+  guard (width == width' && height == height')
+  pure (Box location (Size width height))
+  where
+
+    topLeft     = equal (boxTopLeft style)
+    topRight    = equal (boxTopRight style)
+    bottomLeft  = equal (boxBottomLeft style)
+    bottomRight = equal (boxBottomRight style)
+
+    horizontal  = edge (equal (boxHorizontal style))
+    vertical    = edge (equal (boxVertical style))
+
+    edge        = fmap length . many
+
+data Point = Point !Row !Column
+  deriving (Eq, Show)
+
+type Row = Int
+
+type Column = Int
+
+type Width = Int
+
+type Height = Int
+
+data Size = Size !Width !Height
+  deriving (Eq, Show)
+
+data Box = Box !Point !Size
+  deriving (Eq, Show)
 
 -- Debugging utilities.
 

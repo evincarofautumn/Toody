@@ -1,6 +1,6 @@
-import Data.Char (isDigit, isLetter, isSpace)
 import Control.Applicative
 import Control.Monad
+import Data.Char (isDigit, isLetter, isSpace)
 import Data.Foldable (asum)
 import Data.List (foldl')
 import Test.HUnit
@@ -225,6 +225,6 @@ testParser
   -> [[Char]]
   -> Either ParseError a
   -> Expectation
-testParser parser direction grid expected
-  = (fst <$> runParser parser direction (Just (makeGrid ' ' grid)))
+testParser parser direction cells expected
+  = (fst <$> runParser parser direction (Just (gridFrom ' ' cells)))
     `shouldBe` expected
